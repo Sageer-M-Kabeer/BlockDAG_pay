@@ -13,6 +13,7 @@ import SwapPage from './pages/SwapPage.jsx';
 import StakePage from './pages/StakePage.jsx';
 import LendingPage from './pages/LendingPage.jsx';
 import Settings from './pages/Settings.jsx';
+import Request from './pages/Request.jsx';
 
 const router = createBrowserRouter([
   {
@@ -29,6 +30,7 @@ const router = createBrowserRouter([
       {path: '/stake', element: <StakePage/>},
       {path: '/lend', element: <LendingPage/>},
       {path: '/settings', element: <Settings/>},
+      {path: '/test', element: <Request/>},
     ]
   }
 ]) 

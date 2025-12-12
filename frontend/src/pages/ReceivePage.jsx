@@ -25,13 +25,26 @@ const ReceivePage = () => {
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(1); // 1-5 steps
   const [selectedMethod, setSelectedMethod] = useState(''); // qr, otp, ussd
-  const [amount, setAmount] = useState('');
-  const [memo, setMemo] = useState('');
-  const [expiryTime, setExpiryTime] = useState(10); // minutes
-  const [generatedCode, setGeneratedCode] = useState('');
+  const [generatedCode, setGeneratedCode] = useState('000000');
   const [timer, setTimer] = useState(600); // 10 minutes in seconds
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState('waiting');
+  const [qrImage, setQRImage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // Single state for all form data
+  const [details, setDetails] = useState({
+    merchant_id: localStorage.getItem("id") || "user_123",
+    wallet_address: "0x123456789abcdef", // Hardcoded for now
+    amount: "",
+    currency: "USD",
+    type: "", // This will be set from selectedMethod
+    memo: "",
+    expiry_minutes: 10,
+    merchant: "Echo085",
+    //network: "BlockDAG",
+  });
 
   const steps = [
     { number: 1, label: 'Choose Method' },
@@ -56,13 +69,13 @@ const ReceivePage = () => {
       description: 'Create a 6-digit OTP for customer to enter',
       color: 'text-green-400'
     },
-    { 
-      id: 'ussd', 
-      icon: Smartphone, 
-      label: 'USSD Code', 
-      description: 'Share USSD code for underbanked users',
-      color: 'text-purple-400'
-    }
+    // { 
+    //   id: 'ussd', 
+    //   icon: Smartphone, 
+    //   label: 'USSD Code', 
+    //   description: 'Share USSD code for underbanked users',
+    //   color: 'text-purple-400'
+    // }    //if needed in the future, uncomment and edit the payments.js file inn th ebackend dir to access USSD tooand not just type === otp && qr
   ];
 
   const expiryOptions = [
@@ -90,26 +103,6 @@ const ReceivePage = () => {
     return () => clearInterval(interval);
   }, [activeStep, timer]);
 
-  // Generate code based on method
-  useEffect(() => {
-    if (activeStep === 3 && selectedMethod) {
-      let code = '';
-      switch(selectedMethod) {
-        case 'qr':
-          code = '0x123456789abcdef...';
-          break;
-        case 'otp':
-          code = Array.from({length: 6}, () => Math.floor(Math.random() * 10)).join('');
-          break;
-        case 'ussd':
-          code = '*789*1*234*111#';
-          break;
-      }
-      setGeneratedCode(code);
-      setTimer(expiryTime * 60);
-    }
-  }, [activeStep, selectedMethod, expiryTime]);
-
   // Simulate payment processing
   useEffect(() => {
     if (activeStep === 4) {
@@ -125,6 +118,20 @@ const ReceivePage = () => {
     }
   }, [activeStep]);
 
+  // Handle input changes for the form
+  const handleInputChange = (field, value) => {
+    setDetails(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleMethodSelect = (methodId) => {
+    setSelectedMethod(methodId);
+    // Also update the type in details state
+    handleInputChange('type', methodId);
+  };
+
   const handleNextStep = () => {
     if (activeStep < 5) {
       setActiveStep(activeStep + 1);
@@ -139,8 +146,70 @@ const ReceivePage = () => {
     }
   };
 
-  const handleMethodSelect = (methodId) => {
-    setSelectedMethod(methodId);
+  // Handle form submission
+  const handleSubmit = async () => {
+    if (activeStep === 2) {
+      // Validate required fields
+      if (!details.amount || !details.currency) {
+        setError('Please fill in all required fields');
+        return;
+      }
+
+      setIsSubmitting(true);
+      setError('');
+
+      try {
+        // Prepare the data to send
+        const payload = {
+          merchant: details.merchant,
+          merchant_id: details.merchant_id,
+          amount: parseFloat(details.amount),
+          currency: details.currency,
+          wallet_address: details.wallet_address,
+          // network: details.network,
+          memo: details.memo,
+          type: details.type.toUpperCase()
+          // expiry_minutes: details.expiry_minutes
+        };
+
+        console.log('Sending payment data:', payload);
+
+        const response = await fetch("http://localhost:5000/api/payments/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+        console.log('Response from server:', data);
+
+        if (response.ok) {
+          // If QR is generated, store the QR image
+          if (data.qr) {
+            setQRImage(data.qr);
+          }
+          
+          // Store the generated code if available
+          if (data.otp) {
+            setGeneratedCode(data.otp);
+          }
+          
+          // Move to next step
+          handleNextStep();
+        } else {
+          setError(data.message || 'Failed to create payment');
+        }
+      } catch (err) {
+        console.error('Error submitting form:', err);
+        setError('Network error. Please try again.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      handleNextStep();
+    }
   };
 
   const formatTime = (seconds) => {
@@ -158,7 +227,7 @@ const ReceivePage = () => {
     if (navigator.share) {
       navigator.share({
         title: 'Payment Request',
-        text: `Please send ${amount} USD using ${selectedMethod === 'qr' ? 'QR code' : selectedMethod === 'otp' ? 'OTP' : 'USSD code'}`,
+        text: `Please send ${details.amount} ${details.currency} using ${selectedMethod === 'qr' ? 'QR code' : selectedMethod === 'otp' ? 'OTP' : 'USSD code'}`,
         url: window.location.href,
       });
     } else {
@@ -206,7 +275,13 @@ const ReceivePage = () => {
 
       case 2:
         return (
-          <div className="bg-[#0f2b526e] backdrop-blur-sm rounded-2xl p-6 border border-[#12315D]">
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit();
+            }}
+            className="bg-[#0f2b526e] backdrop-blur-sm rounded-2xl p-6 border border-[#12315D]"
+          >
             <div className="flex items-center gap-3 mb-6">
               <div className={`p-3 rounded-lg ${selectedMethod === 'qr' ? 'bg-blue-900/30' : selectedMethod === 'otp' ? 'bg-green-900/30' : 'bg-purple-900/30'}`}>
                 {selectedMethod === 'qr' && <QrCode className="text-blue-400" size={24} />}
@@ -227,10 +302,14 @@ const ReceivePage = () => {
               <div>
                 <label className="block text-sm font-medium mb-2">Currency</label>
                 <div className="relative">
-                  <select className="w-full bg-[#051837] border border-[#12315D] rounded-xl p-4 appearance-none focus:outline-none focus:ring-2 focus:ring-[#1678FF]">
-                    <option>USD</option>
-                    <option>BDAG</option>
-                    <option>EUR</option>
+                  <select 
+                    value={details.currency}
+                    onChange={(e) => handleInputChange('currency', e.target.value)}
+                    className="w-full bg-[#051837] border border-[#12315D] rounded-xl p-4 appearance-none focus:outline-none focus:ring-2 focus:ring-[#1678FF]"
+                  >
+                    <option value="USD">USD</option>
+                    <option value="BDAG">BDAG</option>
+                    <option value="EUR">EUR</option>
                   </select>
                   <ChevronDown className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
                 </div>
@@ -243,10 +322,11 @@ const ReceivePage = () => {
                   <span className="absolute left-4 top-1/2 transform -translate-y-1/2 text-2xl">$</span>
                   <input
                     type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    value={details.amount}
+                    onChange={(e) => handleInputChange('amount', e.target.value)}
                     placeholder="0.00"
                     className="w-full bg-[#051837] border border-[#12315D] rounded-xl p-4 pl-12 text-2xl focus:outline-none focus:ring-2 focus:ring-[#1678FF]"
+                    required
                   />
                 </div>
                 <p className="text-gray-400 text-sm mt-2">
@@ -259,8 +339,8 @@ const ReceivePage = () => {
                 <label className="block text-sm font-medium mb-2">Memo (Optional)</label>
                 <input
                   type="text"
-                  value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
+                  value={details.memo}
+                  onChange={(e) => handleInputChange('memo', e.target.value)}
                   placeholder="e.g. Coffee payment, Invoice #123"
                   className="w-full bg-[#051837] border border-[#12315D] rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-[#1678FF]"
                 />
@@ -274,9 +354,10 @@ const ReceivePage = () => {
                     {expiryOptions.map((option) => (
                       <button
                         key={option.value}
-                        onClick={() => setExpiryTime(option.value)}
+                        type="button"
+                        onClick={() => handleInputChange('expiry_minutes', option.value)}
                         className={`p-3 rounded-lg transition-colors ${
-                          expiryTime === option.value
+                          details.expiry_minutes === option.value
                             ? 'bg-[#1678FF] text-white'
                             : 'bg-[#10305A] hover:bg-[#123660] text-gray-300'
                         }`}
@@ -294,13 +375,17 @@ const ReceivePage = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span className="text-gray-400">Name:</span>
-                    <span className="font-medium">Echo085</span>
+                    <span className="font-medium">{details.merchant}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-400">Address:</span>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm">0x123456789abcdef</span>
-                      <button className="p-1 hover:bg-[#051837] rounded">
+                      <span className="font-mono text-sm">{details.wallet_address}</span>
+                      <button 
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(details.wallet_address)}
+                        className="p-1 hover:bg-[#051837] rounded"
+                      >
                         <Copy size={16} />
                       </button>
                     </div>
@@ -308,7 +393,14 @@ const ReceivePage = () => {
                 </div>
               </div>
             </div>
-          </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="mt-4 p-3 bg-red-900/20 border border-red-800/30 rounded-lg">
+                <p className="text-red-400 text-sm">{error}</p>
+              </div>
+            )}
+          </form>
         );
 
       case 3:
@@ -325,14 +417,27 @@ const ReceivePage = () => {
               <div className="bg-[#051837] rounded-xl p-8 text-center">
                 {selectedMethod === 'qr' ? (
                   <div className="flex flex-col items-center">
-                    <div className="w-48 h-48 bg-white p-4 rounded-lg mb-4">
-                      <div className="w-full h-full bg-black flex items-center justify-center">
-                        <QrCode size={80} className="text-white" />
+                    {qrImage ? (
+                      <div className="w-48 h-48 bg-white p-4 rounded-lg mb-4">
+                        <img 
+                          src={qrImage} 
+                          alt="QR Code" 
+                          className="w-full h-full"
+                        />
                       </div>
-                    </div>
+                    ) : (
+                      <div className="w-48 h-48 bg-white p-4 rounded-lg mb-4">
+                        <div className="w-full h-full bg-black flex items-center justify-center">
+                          <QrCode size={80} className="text-white" />
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 bg-[#10305A] px-4 py-3 rounded-lg">
                       <span className="font-mono text-sm">{generatedCode}</span>
-                      <button onClick={handleCopyToClipboard} className="p-1 hover:bg-[#0f2b526e] rounded">
+                      <button 
+                        onClick={handleCopyToClipboard} 
+                        className="p-1 hover:bg-[#0f2b526e] rounded"
+                      >
                         <Copy size={16} />
                       </button>
                     </div>
@@ -366,11 +471,11 @@ const ReceivePage = () => {
                 <div className="space-y-4">
                   <div className="flex justify-between">
                     <span className="text-gray-400">Amount:</span>
-                    <span className="font-bold text-xl">{amount || '0.00'} USD</span>
+                    <span className="font-bold text-xl">{details.amount || '0.00'} {details.currency}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Expires:</span>
-                    <span className="font-medium">{expiryTime} minutes</span>
+                    <span className="font-medium">{details.expiry_minutes} minutes</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Method:</span>
@@ -379,6 +484,12 @@ const ReceivePage = () => {
                        selectedMethod === 'otp' ? 'OTP' : 'USSD'}
                     </span>
                   </div>
+                  {details.memo && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Memo:</span>
+                      <span className="font-medium">{details.memo}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -391,7 +502,10 @@ const ReceivePage = () => {
                   <Share2 size={20} />
                   Share
                 </button>
-                <button className="flex items-center justify-center gap-2 p-4 bg-[#10305A] hover:bg-[#123660] rounded-xl font-medium transition-colors">
+                <button 
+                  type="button"
+                  className="flex items-center justify-center gap-2 p-4 bg-[#10305A] hover:bg-[#123660] rounded-xl font-medium transition-colors"
+                >
                   <Download size={20} />
                   Save {selectedMethod === 'qr' ? 'QR Image' : 'Details'}
                 </button>
@@ -405,7 +519,10 @@ const ReceivePage = () => {
                 >
                   View Status
                 </button>
-                <button className="w-full p-4 border border-[#12315D] hover:bg-[#10305A] rounded-xl font-medium transition-colors flex items-center justify-center gap-2">
+                <button 
+                  type="button"
+                  className="w-full p-4 border border-[#12315D] hover:bg-[#10305A] rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+                >
                   <RefreshCw size={20} />
                   Generate New {selectedMethod === 'qr' ? 'QR Code' : selectedMethod === 'otp' ? 'OTP' : 'USSD Code'}
                 </button>
@@ -426,7 +543,7 @@ const ReceivePage = () => {
                 <div className="space-y-4">
                   <div className="flex justify-between">
                     <span className="text-gray-400">Amount</span>
-                    <span className="font-bold">{amount || '150'} USD</span>
+                    <span className="font-bold">{details.amount || '150'} {details.currency}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Status</span>
@@ -515,7 +632,7 @@ const ReceivePage = () => {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Amount Received</span>
-                  <span className="font-bold">{amount || '150'} USD</span>
+                  <span className="font-bold">{details.amount || '150'} {details.currency}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400">Sender</span>
@@ -533,11 +650,17 @@ const ReceivePage = () => {
             </div>
 
             <div className="flex gap-4 justify-center">
-              <button className="flex items-center gap-2 px-6 py-3 bg-[#10305A] hover:bg-[#123660] rounded-xl transition-colors">
+              <button 
+                type="button"
+                className="flex items-center gap-2 px-6 py-3 bg-[#10305A] hover:bg-[#123660] rounded-xl transition-colors"
+              >
                 <Share2 size={20} />
                 Share
               </button>
-              <button className="flex items-center gap-2 px-6 py-3 bg-[#10305A] hover:bg-[#123660] rounded-xl transition-colors">
+              <button 
+                type="button"
+                className="flex items-center gap-2 px-6 py-3 bg-[#10305A] hover:bg-[#123660] rounded-xl transition-colors"
+              >
                 <Printer size={20} />
                 Print
               </button>
@@ -558,6 +681,7 @@ const ReceivePage = () => {
       <div className="flex-1">
         <div className="flex items-center sticky top-0 z-99999 bg-[#111827] border-b border-[#1677ff1c] gap-4 mb-8">
           <button
+            type="button"
             onClick={handlePreviousStep}
             className="p-2 hover:bg-[#0f2b526e] rounded-lg transition-colors"
           >
@@ -621,18 +745,31 @@ const ReceivePage = () => {
           {activeStep < 5 && activeStep !== 4 && activeStep !== 3 && (
             <div className="max-w-4xl mx-auto mt-8 flex gap-4">
               <button 
+                type="button"
                 onClick={handlePreviousStep}
                 className="flex-1 py-3 px-6 rounded-xl font-medium bg-[#0f2b526e] hover:bg-[#10305A] border border-[#12315D] transition-colors"
               >
                 {activeStep === 1 ? 'Cancel' : 'Back'}
               </button>
               <button 
-                onClick={handleNextStep}
-                className="flex-1 py-3 px-6 rounded-xl font-medium bg-[#1678FF] hover:bg-[#1a6eff] transition-colors flex items-center justify-center gap-2"
-                disabled={(activeStep === 1 && !selectedMethod) || (activeStep === 2 && !amount)}
+                type="button"
+                onClick={handleSubmit}
+                disabled={(activeStep === 1 && !selectedMethod) || 
+                         (activeStep === 2 && (!details.amount || !details.currency)) ||
+                         isSubmitting}
+                className="flex-1 py-3 px-6 rounded-xl font-medium bg-[#1678FF] hover:bg-[#1a6eff] transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {activeStep === 1 ? 'Continue' :
-                activeStep === 2 ? `Generate ${selectedMethod === 'qr' ? 'QR Code' : selectedMethod === 'otp' ? 'OTP' : 'USSD Code'}` : 'Next'}
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="animate-spin" size={20} />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    {activeStep === 1 ? 'Continue' :
+                    activeStep === 2 ? `Generate ${selectedMethod === 'qr' ? 'QR Code' : selectedMethod === 'otp' ? 'OTP' : 'USSD Code'}` : 'Next'}
+                  </>
+                )}
               </button>
             </div>
           )}
@@ -640,6 +777,7 @@ const ReceivePage = () => {
           {activeStep === 5 && (
             <div className="max-w-4xl mx-auto mt-8">
               <button 
+                type="button"
                 onClick={() => navigate('/dashboard')}
                 className="w-full py-3 px-6 rounded-xl font-medium bg-[#1678FF] hover:bg-[#1a6eff] transition-colors"
               >
