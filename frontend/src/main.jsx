@@ -14,6 +14,7 @@ import StakePage from './pages/StakePage.jsx';
 import LendingPage from './pages/LendingPage.jsx';
 import Settings from './pages/Settings.jsx';
 import Request from './pages/Request.jsx';
+import VerifyEmailPage from './pages/verifyEmailPage.jsx';
 
 const router = createBrowserRouter([
   {
@@ -31,6 +32,7 @@ const router = createBrowserRouter([
       {path: '/lend', element: <LendingPage/>},
       {path: '/settings', element: <Settings/>},
       {path: '/test', element: <Request/>},
+      {path: '/verify-email/:token', element: <VerifyEmailPage/>},
     ]
   }
 ]) 
