@@ -32,7 +32,7 @@ router.post("/create", async (req, res) => {
         otp = generateOTP();
     }
 
-    /*const payment = await Payment.create({
+    const payment = await Payment.create({
       id,
       merchant_id,
       amount,
@@ -45,7 +45,7 @@ router.post("/create", async (req, res) => {
       status: "pending",
       created_at,
       expires_at
-    });*/
+    });
 
     return res.json({
       uuid: id,
@@ -55,6 +55,16 @@ router.post("/create", async (req, res) => {
         // message: req.body
     });
 
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.get("/all", async (req, res) => { 
+  try {
+    const payments = await Payment.find({});
+    return res.json(payments);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
