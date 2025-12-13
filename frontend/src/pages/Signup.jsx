@@ -1,3 +1,4 @@
+// Updated SignUpPage.js
 import React, { useState } from 'react';
 import { 
   Mail, 
@@ -14,15 +15,17 @@ import {
   Loader2
 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { api, setAuthToken } from '../utils/api';
 
 const SignUpPage = () => {
   const navigate = useNavigate();
-  const [step, setStep] = useState(1); // 1: Role selection, 2: Individual form, 3: Organization form, 4: Success
-  const [role, setRole] = useState('individual'); // individual or organization
+  const [step, setStep] = useState(1);
+  const [role, setRole] = useState('individual');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [verificationToken, setVerificationToken] = useState('');
 
   // Individual form state
   const [individualForm, setIndividualForm] = useState({
@@ -46,6 +49,7 @@ const SignUpPage = () => {
 
   // Validation errors
   const [errors, setErrors] = useState({});
+  const [apiError, setApiError] = useState('');
 
   const validateIndividualForm = () => {
     const newErrors = {};
@@ -131,7 +135,6 @@ const SignUpPage = () => {
 
   const handleIndividualChange = (field, value) => {
     setIndividualForm(prev => ({ ...prev, [field]: value }));
-    // Clear error for this field
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: null }));
     }
@@ -139,7 +142,6 @@ const SignUpPage = () => {
 
   const handleOrganizationChange = (field, value) => {
     setOrganizationForm(prev => ({ ...prev, [field]: value }));
-    // Clear error for this field
     if (errors[field]) {
       setErrors(prev => ({ ...prev, [field]: null }));
     }
@@ -147,23 +149,79 @@ const SignUpPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setApiError('');
     
     let isValid = false;
+    let formData = {};
+    
     if (role === 'individual') {
       isValid = validateIndividualForm();
+      formData = {
+        account_type: 'individual',
+        email: individualForm.email,
+        phone: individualForm.phone,
+        password: individualForm.password,
+        full_name: individualForm.fullName
+      };
     } else {
       isValid = validateOrganizationForm();
+      formData = {
+        account_type: 'organization',
+        email: organizationForm.organizationEmail,
+        phone: organizationForm.phone,
+        password: organizationForm.password,
+        organization_name: organizationForm.organizationName,
+        cac_number: organizationForm.cacNumber,
+        contact_person: organizationForm.contactPerson,
+        organization_email: organizationForm.organizationEmail
+      };
     }
     
     if (!isValid) return;
     
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const response = await api.signup(formData);
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Signup failed');
+      }
+      
+      // Store the token if provided
+      if (response.token) {
+        setAuthToken(response.token);
+      }
+      
+      // Store verification token for development mode
+      if (response.verification_token) {
+        setVerificationToken(response.verification_token);
+      }
+      
       setIsLoading(false);
       setStep(4); // Success step
-    }, 2000);
+      
+    } catch (error) {
+      setIsLoading(false);
+      setApiError(error.message || 'An error occurred during signup');
+      console.error('Signup error:', error);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (!verificationToken) return;
+    
+    setIsLoading(true);
+    try {
+      await api.verifyEmail(verificationToken);
+      // Redirect to login after successful verification
+      navigate('/login', { 
+        state: { message: 'Email verified successfully! You can now login.' }
+      });
+    } catch (error) {
+      setApiError(error.message || 'Failed to verify email');
+      setIsLoading(false);
+    }
   };
 
   const renderStep = () => {
@@ -233,6 +291,15 @@ const SignUpPage = () => {
               <h2 className="text-3xl font-bold mb-2">Individual Registration</h2>
               <p className="text-gray-400">Create your personal DAGPay account</p>
             </div>
+            
+            {apiError && (
+              <div className="mb-6 p-4 bg-red-900/30 border border-red-700/50 rounded-xl">
+                <p className="text-red-400 flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {apiError}
+                </p>
+              </div>
+            )}
             
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Full Name */}
@@ -428,6 +495,15 @@ const SignUpPage = () => {
               <h2 className="text-3xl font-bold mb-2">Organization Registration</h2>
               <p className="text-gray-400">Create your organization DAGPay account</p>
             </div>
+            
+            {apiError && (
+              <div className="mb-6 p-4 bg-red-900/30 border border-red-700/50 rounded-xl">
+                <p className="text-red-400 flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {apiError}
+                </p>
+              </div>
+            )}
             
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Organization Name */}
@@ -650,6 +726,7 @@ const SignUpPage = () => {
           </div>
         );
 
+      // In SignUpPage.js, update the success step (case 4)
       case 4:
         return (
           <div className="text-center">
@@ -662,13 +739,41 @@ const SignUpPage = () => {
                 ? 'Your personal DAGPay account has been created successfully.'
                 : 'Your organization DAGPay account has been created successfully.'}
             </p>
+            
             <div className="bg-[#030D43]/30 rounded-xl p-6 mb-8">
-              <p className="text-gray-400 mb-4">A verification email has been sent to:</p>
-              <p className="text-xl font-medium">
-                {role === 'individual' ? individualForm.email : organizationForm.organizationEmail}
-              </p>
-              <p className="text-gray-400 text-sm mt-2">Please check your inbox to verify your email</p>
+              <div className="flex items-center gap-3 mb-4">
+                <Mail className="text-blue-400" size={24} />
+                <div className="text-left">
+                  <p className="text-gray-400 mb-1">Verification email sent to:</p>
+                  <p className="text-xl font-medium">
+                    {role === 'individual' ? individualForm.email : organizationForm.organizationEmail}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="bg-blue-900/20 border border-blue-800/30 rounded-lg p-4 mt-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="text-blue-400 flex-shrink-0 mt-0.5" size={18} />
+                  <div className="text-sm text-blue-300">
+                    Please check your inbox (and spam folder) for the verification email.
+                    Click the link in the email to activate your account.
+                  </div>
+                </div>
+              </div>
+              
+              {/* Development mode warning */}
+              {process.env.NODE_ENV === 'development' && verificationToken && (
+                <div className="mt-4 p-4 bg-yellow-900/20 border border-yellow-700/30 rounded-lg">
+                  <p className="text-yellow-400 text-sm mb-2">⚠️ Development Mode</p>
+                  <p className="text-yellow-300 text-xs">
+                    In development, emails aren't actually sent. For testing:<br />
+                    1. Copy this token: <code className="bg-black/30 p-1 rounded">{verificationToken.substring(0, 20)}...</code><br />
+                    2. Visit: <Link to={`/verify-email/${verificationToken}`} className="underline">/verify-email/{verificationToken.substring(0, 20)}...</Link>
+                  </p>
+                </div>
+              )}
             </div>
+            
             <div className="space-y-4">
               <button
                 onClick={() => navigate('/login')}
@@ -685,7 +790,6 @@ const SignUpPage = () => {
             </div>
           </div>
         );
-
       default:
         return null;
     }

@@ -1,3 +1,4 @@
+// Updated LoginPage.js
 import React, { useState } from 'react';
 import { 
   Mail, 
@@ -12,11 +13,13 @@ import {
   Shield,
   ChevronLeft
 } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { api, setAuthToken, clearAuthToken } from '../utils/api';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const [mode, setMode] = useState('login'); // login, forgot-password, reset-password, success
+  const location = useLocation();
+  const [mode, setMode] = useState('login');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -38,9 +41,20 @@ const LoginPage = () => {
   const [verificationSent, setVerificationSent] = useState(false);
   const [emailVerified, setEmailVerified] = useState(false);
   const [errors, setErrors] = useState({});
+  const [apiError, setApiError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   
   // Steps for forgot password
-  const [step, setStep] = useState(1); // 1: Email, 2: Verification, 3: New Password, 4: Success
+  const [step, setStep] = useState(1);
+
+  // Check for success message from location state
+  React.useEffect(() => {
+    if (location.state?.message) {
+      setSuccessMessage(location.state.message);
+      // Clear location state
+      window.history.replaceState({}, document.title);
+    }
+  }, [location]);
 
   const validateLoginForm = () => {
     const newErrors = {};
@@ -73,8 +87,6 @@ const LoginPage = () => {
     if (step === 2) {
       if (!forgotPasswordForm.verificationCode.trim()) {
         newErrors.verificationCode = 'Verification code is required';
-      } else if (forgotPasswordForm.verificationCode.length !== 4) {
-        newErrors.verificationCode = 'Code must be 4 digits';
       }
     }
     
@@ -98,26 +110,54 @@ const LoginPage = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setApiError('');
     
     if (!validateLoginForm()) return;
     
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const response = await api.login({
+        email: loginForm.email,
+        password: loginForm.password
+      });
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Login failed');
+      }
+      
+      // Store the token
+      setAuthToken(response.token);
+      
+      // You can also store user info if needed
+      if (response.user) {
+        localStorage.setItem('dagpay_user', JSON.stringify(response.user));
+      }
+      
+      // Redirect to dashboard
+      navigate('/dashboard');
+      
+    } catch (error) {
       setIsLoading(false);
-      navigate('/dashboard'); // Redirect to dashboard
-    }, 2000);
+      setApiError(error.message || 'Login failed');
+      
+      // Handle verification requirement
+      if (error.message.includes('verify your email')) {
+        setApiError('Please verify your email before logging in. Check your inbox for verification instructions.');
+        // Optionally show a button to resend verification email
+      }
+    }
   };
 
   const handleForgotPassword = async (e) => {
     e.preventDefault();
+    setApiError('');
     
     if (!validateForgotPasswordForm()) return;
     
     setIsLoading(true);
     
-    // Simulate API calls for each step
+    // Simulate API calls for each step (implement actual API later)
     setTimeout(() => {
       setIsLoading(false);
       
@@ -162,8 +202,26 @@ const LoginPage = () => {
 
   const renderLoginMode = () => (
     <div>
+      {successMessage && (
+        <div className="mb-6 p-4 bg-green-900/30 border border-green-700/50 rounded-xl">
+          <p className="text-green-400 flex items-center gap-2">
+            <CheckCircle size={16} />
+            {successMessage}
+          </p>
+        </div>
+      )}
+      
       <h2 className="text-3xl font-bold mb-2">Welcome Back</h2>
       <p className="text-gray-400 mb-8">Sign in to your DAGPay account</p>
+      
+      {apiError && (
+        <div className="mb-6 p-4 bg-red-900/30 border border-red-700/50 rounded-xl">
+          <p className="text-red-400 flex items-center gap-2">
+            <AlertCircle size={16} />
+            {apiError}
+          </p>
+        </div>
+      )}
       
       <form onSubmit={handleLogin} className="space-y-6">
         {/* Email */}
@@ -284,6 +342,15 @@ const LoginPage = () => {
               <p className="text-gray-400">Enter your email to receive a verification code</p>
             </div>
             
+            {apiError && (
+              <div className="mb-6 p-4 bg-red-900/30 border border-red-700/50 rounded-xl">
+                <p className="text-red-400 flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {apiError}
+                </p>
+              </div>
+            )}
+            
             <form onSubmit={handleForgotPassword} className="space-y-6">
               <div className="bg-blue-900/20 border border-blue-800/30 rounded-xl p-4 mb-6">
                 <div className="flex items-start gap-3">
@@ -291,7 +358,7 @@ const LoginPage = () => {
                   <div className="text-sm">
                     <div className="font-medium text-blue-300 mb-1">Security Check</div>
                     <div className="text-blue-400/80">
-                      We'll send a 4-digit verification code to your email address.
+                      We'll send a verification code to your email address.
                     </div>
                   </div>
                 </div>
@@ -348,9 +415,18 @@ const LoginPage = () => {
               </button>
               <h2 className="text-3xl font-bold mb-2">Enter Verification Code</h2>
               <p className="text-gray-400">
-                We sent a 4-digit code to <span className="font-medium">{forgotPasswordForm.email}</span>
+                We sent a code to <span className="font-medium">{forgotPasswordForm.email}</span>
               </p>
             </div>
+            
+            {apiError && (
+              <div className="mb-6 p-4 bg-red-900/30 border border-red-700/50 rounded-xl">
+                <p className="text-red-400 flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {apiError}
+                </p>
+              </div>
+            )}
             
             <form onSubmit={handleForgotPassword} className="space-y-6">
               <div className="text-center">
@@ -442,6 +518,15 @@ const LoginPage = () => {
                 </div>
               </div>
             </div>
+            
+            {apiError && (
+              <div className="mb-6 p-4 bg-red-900/30 border border-red-700/50 rounded-xl">
+                <p className="text-red-400 flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {apiError}
+                </p>
+              </div>
+            )}
             
             <form onSubmit={handleForgotPassword} className="space-y-6">
               <div>
